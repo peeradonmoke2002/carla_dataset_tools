@@ -15,7 +15,9 @@ from core.transform import bbox_to_o3d_bbox
 
 
 class Param:
-    POINTS_MIN = 20
+    POINTS_MIN_CAR = 20       # Minimum LiDAR points for cars
+    POINTS_MIN_PEDESTRIAN = 5  # Minimum LiDAR points for pedestrians (smaller objects)
+    POINTS_MIN = 20           # Default (legacy)
     RANGE_MIN = 1.0
     RANGE_MAX = 150.0
 
@@ -99,14 +101,29 @@ def cal_truncated(image_length, image_width, bbox_2d: list) -> float:
     return truncated
 
 
-def cal_occlusion(pcd: o3d.geometry.PointCloud, bbox_3d: o3d.geometry.OrientedBoundingBox):
+def cal_occlusion(pcd: o3d.geometry.PointCloud, bbox_3d: o3d.geometry.OrientedBoundingBox, points_min=None):
+    """
+    Calculate occlusion level based on number of LiDAR points in bounding box.
+
+    Args:
+        pcd: Open3D point cloud
+        bbox_3d: Open3D oriented bounding box
+        points_min: Minimum points threshold. If None, uses Param.POINTS_MIN.
+                   Use Param.POINTS_MIN_PEDESTRIAN for pedestrians (smaller threshold).
+
+    Returns:
+        occlusion: -1 (invalid/too few points), 0 (fully visible), 1 (partly occluded), 2 (heavily occluded)
+    """
+    if points_min is None:
+        points_min = Param.POINTS_MIN
+
     occlusion = 2
     p_in_bbox = bbox_3d.get_point_indices_within_bounding_box(pcd.points)
     p_num = len(p_in_bbox)
-    if p_num < Param.POINTS_MIN:
+    if p_num < points_min:
         occlusion = -1
         return occlusion
-    elif p_num > Param.POINTS_MIN:
+    elif p_num > points_min:
         occlusion = 0
     if p_num + bbox_3d.center[0] < 250:
         occlusion = 1

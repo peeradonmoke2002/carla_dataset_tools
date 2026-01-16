@@ -137,8 +137,25 @@ class KittiObjectLabelTool:
             # Convert object label to open3d bbox type in lidar coordinate
             o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
 
+            # Scale up pedestrian bounding boxes for LiDAR point detection
+            # CARLA walker bbox is based on collision capsule (~0.38m x 0.38m x 1.3m)
+            # Real pedestrian is larger (~0.6m x 0.5m x 1.8m), so scale up for point capture
+            if label_type == 'Pedestrian':
+                # Create scaled bbox for point detection (2x width/depth, 1.5x height)
+                scaled_extent = o3d_bbox.extent.copy()
+                scaled_extent[0] *= 2.0  # Width
+                scaled_extent[1] *= 2.0  # Depth
+                scaled_extent[2] *= 1.5  # Height
+                o3d_bbox_for_points = o3d.geometry.OrientedBoundingBox(
+                    o3d_bbox.center, o3d_bbox.R, scaled_extent
+                )
+            else:
+                o3d_bbox_for_points = o3d_bbox
+
             # Check lidar points in bbox
-            occlusion = cal_occlusion(o3d_pcd, o3d_bbox)
+            # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
+            points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
+            occlusion = cal_occlusion(o3d_pcd, o3d_bbox_for_points, points_min=points_min)
             if occlusion < 0:
                 continue
 
@@ -194,12 +211,16 @@ class KittiObjectLabelTool:
             if bbox_width <= 0 or bbox_height <= 0:
                 continue
 
-            # Filter 4: Minimum height requirement (KITTI standard: 25 pixels)
-            if bbox_height < 25:
+            # Filter 4: Minimum height requirement
+            # Pedestrians are smaller, use lower threshold (15px vs 25px for cars)
+            min_height = 15 if label_type == 'Pedestrian' else 25
+            if bbox_height < min_height:
                 continue
 
             # Filter 5: Minimum area requirement
-            if bbox_area < 100:
+            # Pedestrians are smaller, use lower threshold (50px vs 100px for cars)
+            min_area = 50 if label_type == 'Pedestrian' else 100
+            if bbox_area < min_area:
                 continue
 
             # Filter 6: Bbox must be at least partially within image bounds
