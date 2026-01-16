@@ -173,6 +173,12 @@ class ActorFactory(object):
         root.get_children().extend(ov_nodes)
         logger.info(f"✓ Created {len(ov_nodes)} background vehicles")
 
+        # Create pedestrians with AI controllers
+        pedestrians_info = config.get("pedestrians", {})
+        logger.info("Creating pedestrians...")
+        ped_nodes, self.walker_ids = self.create_pedestrians(pedestrians_info)
+        root.get_children().extend(ped_nodes)
+
         return root
 
     def create_world_node(self):
@@ -227,7 +233,17 @@ class ActorFactory(object):
         Returns:
             List of other vehicle nodes
         """
-        blueprints = self.blueprint_lib.filter('vehicle.*')
+        # Filter to only spawn CAR vehicles (exclude trucks, buses, motorcycles, bicycles)
+        all_blueprints = self.blueprint_lib.filter('vehicle.*')
+        blueprints = [bp for bp in all_blueprints if not any(x in bp.id.lower() for x in
+                     ['truck', 'bus', 'motorcycle', 'bicycle', 'motorbike', 'bike',
+                      'ambulance', 'firetruck', 'police', 'van', 'carlacola'])]
+
+        if not blueprints:
+            logger.warning("No car blueprints found after filtering. Using all vehicles.")
+            blueprints = all_blueprints
+
+        logger.info(f"Filtered to {len(blueprints)} car blueprints (excluded trucks, buses, etc.)")
         other_vehicle_nodes = []
 
         # Get spawn points list if specified
@@ -273,6 +289,131 @@ class ActorFactory(object):
                 other_vehicle_nodes.append(other_vehicle_node)
 
         return other_vehicle_nodes
+
+    def create_pedestrians(self, pedestrians_info):
+        """
+        Create pedestrian walkers with AI controllers.
+
+        Based on CARLA's generate_traffic.py example.
+        Spawns pedestrians at random navigation points and gives them AI controllers
+        to walk around the environment.
+
+        Args:
+            pedestrians_info: Dictionary with 'count' for number of pedestrians
+
+        Returns:
+            tuple: (walker_nodes, all_walker_ids) - nodes for cleanup tracking
+        """
+        import carla
+        from numpy import random as np_random
+
+        pedestrian_nodes = []
+        all_walker_ids = []
+
+        try:
+            pedestrian_count = pedestrians_info.get('count', 0)
+        except (AttributeError, ValueError):
+            pedestrian_count = 0
+
+        if pedestrian_count <= 0:
+            return pedestrian_nodes, all_walker_ids
+
+        logger.info(f"Spawning {pedestrian_count} pedestrians...")
+
+        # Get walker blueprints
+        walker_blueprints = self.blueprint_lib.filter('walker.pedestrian.*')
+        if not walker_blueprints:
+            logger.warning("No pedestrian blueprints found!")
+            return pedestrian_nodes, all_walker_ids
+
+        # 1. Get random spawn locations from navigation mesh
+        spawn_points = []
+        for i in range(pedestrian_count):
+            spawn_point = carla.Transform()
+            loc = self.world.get_random_location_from_navigation()
+            if loc is not None:
+                spawn_point.location = loc
+                spawn_points.append(spawn_point)
+
+        if not spawn_points:
+            logger.warning("Could not find valid navigation points for pedestrians")
+            return pedestrian_nodes, all_walker_ids
+
+        # 2. Spawn walker actors
+        walkers_list = []
+        walker_speeds = []
+        batch = []
+
+        for spawn_point in spawn_points:
+            walker_bp = np_random.choice(walker_blueprints)
+
+            # Set as not invincible
+            if walker_bp.has_attribute('is_invincible'):
+                walker_bp.set_attribute('is_invincible', 'false')
+
+            # Set walking speed (use recommended walking speed)
+            if walker_bp.has_attribute('speed'):
+                walker_speeds.append(walker_bp.get_attribute('speed').recommended_values[1])
+            else:
+                walker_speeds.append(1.4)  # Default walking speed
+
+            batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
+
+        # Execute batch spawn
+        results = self.client.apply_batch_sync(batch, True)
+        valid_speeds = []
+        for i, result in enumerate(results):
+            if result.error:
+                logger.debug(f"Failed to spawn pedestrian: {result.error}")
+            else:
+                walkers_list.append({"id": result.actor_id})
+                valid_speeds.append(walker_speeds[i])
+        walker_speeds = valid_speeds
+
+        if not walkers_list:
+            logger.warning("No pedestrians were spawned successfully")
+            return pedestrian_nodes, all_walker_ids
+
+        # 3. Spawn AI controllers for each walker
+        walker_controller_bp = self.blueprint_lib.find('controller.ai.walker')
+        batch = []
+        for walker in walkers_list:
+            batch.append(carla.command.SpawnActor(walker_controller_bp, carla.Transform(), walker["id"]))
+
+        results = self.client.apply_batch_sync(batch, True)
+        for i, result in enumerate(results):
+            if result.error:
+                logger.debug(f"Failed to spawn walker controller: {result.error}")
+            else:
+                walkers_list[i]["con"] = result.actor_id
+
+        # 4. Collect all IDs (controller, walker pairs)
+        for walker in walkers_list:
+            if "con" in walker:
+                all_walker_ids.append(walker["con"])
+                all_walker_ids.append(walker["id"])
+
+        # Wait for tick to ensure transforms are ready
+        self.world.tick()
+
+        # 5. Initialize controllers and set them walking
+        all_actors = self.world.get_actors(all_walker_ids)
+        self.world.set_pedestrians_cross_factor(0.1)  # 10% chance to cross roads
+
+        for i in range(0, len(all_walker_ids), 2):
+            try:
+                # Start the walker controller
+                all_actors[i].start()
+                # Set destination to random point
+                all_actors[i].go_to_location(self.world.get_random_location_from_navigation())
+                # Set max speed
+                all_actors[i].set_max_speed(float(walker_speeds[int(i/2)]))
+            except Exception as e:
+                logger.debug(f"Error initializing walker controller: {e}")
+
+        logger.info(f"✓ Spawned {len(walkers_list)} pedestrians with AI controllers")
+
+        return pedestrian_nodes, all_walker_ids
 
     def create_infrastructure_node(self, actor_info):
         infrastructure_name = get_name_from_json(actor_info, self.v2x_layer_name_set)
@@ -639,7 +780,17 @@ class ActorFactory(object):
                 - use_autopilot: True (all background vehicles use autopilot)
         """
         commands = []
-        blueprints = self.blueprint_lib.filter('vehicle.*')
+        # Filter to only spawn CAR vehicles (exclude trucks, buses, motorcycles, bicycles)
+        all_blueprints = self.blueprint_lib.filter('vehicle.*')
+        blueprints = [bp for bp in all_blueprints if not any(x in bp.id.lower() for x in
+                     ['truck', 'bus', 'motorcycle', 'bicycle', 'motorbike', 'bike',
+                      'ambulance', 'firetruck', 'police', 'van', 'carlacola'])]
+
+        if not blueprints:
+            logger.warning("No car blueprints found after filtering. Using all vehicles.")
+            blueprints = all_blueprints
+
+        logger.info(f"Filtered to {len(blueprints)} car blueprints for batch spawning")
 
         # Get spawn points list if specified
         try:

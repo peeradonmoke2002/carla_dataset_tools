@@ -123,10 +123,10 @@ class KittiObjectLabelTool:
         bbox_list_2d = []
         kitti_labels = []
         for label in objects_labels:
-            # Kitti Object - Type
-            if label.label_type == 'vehicle':
+            # Kitti Object - Type - Preserve Car and Pedestrian labels
+            if label.label_type == 'Car':
                 label_type = 'Car'
-            elif label.label_type:
+            elif label.label_type == 'Pedestrian':
                 label_type = 'Pedestrian'
             else:
                 label_type = 'DontCare'

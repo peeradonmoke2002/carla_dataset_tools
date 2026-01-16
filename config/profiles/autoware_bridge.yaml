@@ -1,0 +1,198 @@
+# CARLA Dataset Recording Configuration - Autoware Bridge Compatible
+# Matches sensor setup from autoware_carla_bridge/config/objects.json
+# Compatible with CARLA 0.9.16
+
+# ============================================================================
+# Recording Settings
+# ============================================================================
+recording:
+  frame_total: 12000        # Total frames to record
+  frame_step: 1             # Save every frame (30Hz with lidar rotation_frequency: 30)
+  map: Town01               # Default map (matching bridge default)
+  weather: ClearNoon        # Weather preset
+
+# ============================================================================
+# Spectator Camera Position - Bird's eye view
+# ============================================================================
+spectator:
+  x: 100.0
+  y: -150.0
+  z: 150.0
+  roll: 0.0
+  pitch: 60.0
+  yaw: -90.0
+
+# ============================================================================
+# World Physics Settings
+# ============================================================================
+world_settings:
+  synchronous_mode: true
+  fixed_delta_seconds: 0.03333  # 30 Hz to match lidar rotation_frequency
+  substepping: true
+  max_substep_delta_time: 0.005
+  max_substeps: 20
+
+  # Vehicle stabilization settings
+  vehicle_stabilization:
+    init_tick_num: 5
+
+# ============================================================================
+# Traffic Light Settings
+# ============================================================================
+traffic_lights:
+  red_time: 2.0
+  green_time: 2.0
+  yellow_time: 0.01
+
+# ============================================================================
+# Sensor Templates - Matching autoware_carla_bridge
+# ============================================================================
+sensor_templates:
+  # Front RGB Camera - matches bridge rgb_front
+  autoware_camera_front: &autoware_camera_front
+    type: sensor.camera.rgb
+    image_size_x: 1920
+    image_size_y: 1080
+    fov: 90.0
+
+  # Semantic Segmentation Camera
+  autoware_semantic_front: &autoware_semantic_front
+    type: sensor.camera.semantic_segmentation
+    image_size_x: 1920
+    image_size_y: 1080
+    fov: 90.0
+
+  # LiDAR - matches bridge lidar configuration
+  autoware_lidar: &autoware_lidar
+    type: sensor.lidar.ray_cast
+    range: 100
+    channels: 64
+    points_per_second: 300000
+    upper_fov: 10.0
+    lower_fov: -30.0
+    rotation_frequency: 30
+    noise_stddev: 0.0
+
+  # Semantic LiDAR for ground truth labels
+  autoware_semantic_lidar: &autoware_semantic_lidar
+    type: sensor.lidar.ray_cast_semantic
+    range: 100
+    channels: 64
+    points_per_second: 300000
+    upper_fov: 10.0
+    lower_fov: -30.0
+    rotation_frequency: 30
+
+  # GNSS - matches bridge gnss configuration
+  autoware_gnss: &autoware_gnss
+    type: sensor.other.gnss
+    noise_alt_stddev: 0.0
+    noise_lat_stddev: 0.0
+    noise_lon_stddev: 0.0
+    noise_alt_bias: 0.0
+    noise_lat_bias: 0.0
+    noise_lon_bias: 0.0
+
+  # IMU - matches bridge imu configuration
+  autoware_imu: &autoware_imu
+    type: sensor.other.imu
+    noise_accel_stddev_x: 0.0
+    noise_accel_stddev_y: 0.0
+    noise_accel_stddev_z: 0.0
+    noise_gyro_stddev_x: 0.0
+    noise_gyro_stddev_y: 0.0
+    noise_gyro_stddev_z: 0.0
+    noise_gyro_bias_x: 0.0
+    noise_gyro_bias_y: 0.0
+    noise_gyro_bias_z: 0.0
+
+# ============================================================================
+# Ego Vehicle with Autoware-compatible Sensors
+# ============================================================================
+actors:
+  # Primary ego vehicle - Tesla Model 3 (matching bridge)
+  - type: vehicle.tesla.model3
+    name: vehicle_1st
+    spawn_point: 73  # You can change this to match your preferred spawn point
+    sensors:
+      # Front RGB Camera (image_2 for KITTI compatibility)
+      - <<: *autoware_camera_front
+        name: image_2
+        spawn_point:
+          x: 0.7          # Matching bridge: rgb_front
+          y: 0.0
+          z: 1.6
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+      # Semantic Segmentation Camera
+      - <<: *autoware_semantic_front
+        name: image_2_semantic
+        spawn_point:
+          x: 0.7
+          y: 0.0
+          z: 1.6
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+      # LiDAR (velodyne for KITTI compatibility)
+      - <<: *autoware_lidar
+        name: velodyne
+        spawn_point:
+          x: 0.0          # Matching bridge: lidar
+          y: 0.0
+          z: 3.1
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+      # Semantic LiDAR for labels
+      - <<: *autoware_semantic_lidar
+        name: velodyne_semantic
+        spawn_point:
+          x: 0.0
+          y: 0.0
+          z: 3.1
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+      # GNSS
+      - <<: *autoware_gnss
+        name: gnss
+        spawn_point:
+          x: 0.0          # Matching bridge: gnss
+          y: 0.0
+          z: 1.6
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+      # IMU
+      - <<: *autoware_imu
+        name: imu
+        spawn_point:
+          x: 0.0          # Matching bridge: imu
+          y: 0.0
+          z: 1.6
+          roll: 0.0
+          pitch: 0.0
+          yaw: 0.0
+
+# ============================================================================
+# Background Traffic - Only Cars and Pedestrians
+# ============================================================================
+other_vehicles:
+  count: 50                 # Number of background cars
+  spawn_points: []          # Random spawn points (filtered to cars only)
+
+# ============================================================================
+# Pedestrians - Walking NPCs with AI controllers
+# ============================================================================
+pedestrians:
+  count: 80                 # 80 pedestrians for good visibility
+  spawn_near_ego: true      # Spawn within radius of ego vehicle
+  spawn_radius: 80.0        # Spawn within 80m of ego vehicle
+  percentage_crossing: 0.3  # 30% chance to cross roads

@@ -123,6 +123,9 @@ class ActorTree(object):
             client: carla.Client instance for batch operations
             tm_port: Traffic Manager port (for autopilot, used later)
         """
+        # Store client for pedestrian spawning
+        self.client = client
+
         # Phase 1: Prepare spawn commands
         self.prepare_spawn_commands()
 
@@ -137,6 +140,9 @@ class ActorTree(object):
 
         # Phase 5: Build sensor nodes and attach
         self.build_sensor_nodes(sensor_responses, self.vehicle_nodes_map)
+
+        # Phase 6: Spawn pedestrians with AI controllers
+        self.spawn_pedestrians(client)
 
     def prepare_spawn_commands(self):
         """
@@ -604,14 +610,216 @@ class ActorTree(object):
 
         return success_count
 
+    def spawn_pedestrians(self, client):
+        """
+        Phase 6: Spawn pedestrians with AI controllers.
+
+        Based on CARLA's generate_traffic.py example. Spawns pedestrians at random
+        navigation points and gives them AI controllers to walk around.
+
+        Supports spawn_near_ego option to spawn pedestrians close to ego vehicle
+        for better visibility in camera.
+
+        Config options:
+            count: Number of pedestrians to spawn
+            spawn_near_ego: If True, spawn within radius of ego vehicle (default: True)
+            spawn_radius: Radius in meters for spawn_near_ego (default: 80.0)
+            percentage_crossing: Chance to cross roads (default: 0.2)
+
+        Args:
+            client: carla.Client instance for batch operations
+        """
+        import carla
+        from numpy import random as np_random
+
+        logger.info("Phase 6: Spawning pedestrians...")
+
+        # Get pedestrian config
+        pedestrians_info = self.config.get("pedestrians", {})
+        try:
+            pedestrian_count = pedestrians_info.get('count', 0)
+        except (AttributeError, ValueError):
+            pedestrian_count = 0
+
+        if pedestrian_count <= 0:
+            logger.info("No pedestrians to spawn (count=0)")
+            self.walker_ids = []
+            return
+
+        # Get spawn configuration
+        spawn_near_ego = pedestrians_info.get('spawn_near_ego', True)  # Default: spawn near ego
+        spawn_radius = pedestrians_info.get('spawn_radius', 80.0)  # Default: 80m radius
+        percentage_crossing = pedestrians_info.get('percentage_crossing', 0.2)  # 20% cross roads
+
+        # Get walker blueprints - filter to pedestrian only
+        blueprint_lib = self.world.get_blueprint_library()
+        walker_blueprints = [bp for bp in blueprint_lib.filter('walker.pedestrian.*')]
+        if not walker_blueprints:
+            logger.warning("No pedestrian blueprints found!")
+            self.walker_ids = []
+            return
+
+        logger.info(f"Spawning {pedestrian_count} pedestrians (near_ego={spawn_near_ego}, radius={spawn_radius}m)...")
+
+        # Get ego vehicle location if spawn_near_ego is enabled
+        ego_location = None
+        if spawn_near_ego:
+            # Find the first vehicle (ego vehicle)
+            for cmd_idx, vehicle_node in self.vehicle_nodes_map.items():
+                cmd = self.spawn_commands[cmd_idx]
+                if cmd.get('type') == 'vehicle':
+                    try:
+                        ego_location = vehicle_node.get_actor().carla_actor.get_location()
+                        logger.info(f"  Ego position: ({ego_location.x:.1f}, {ego_location.y:.1f})")
+                        break
+                    except Exception:
+                        pass
+
+        # 1. Get spawn locations from navigation mesh
+        spawn_points = []
+        attempts = 0
+        max_attempts = pedestrian_count * 30  # Try more times to find valid locations
+
+        while len(spawn_points) < pedestrian_count and attempts < max_attempts:
+            attempts += 1
+            loc = self.world.get_random_location_from_navigation()
+
+            if loc is None:
+                continue
+
+            # If spawn_near_ego, filter by distance
+            if spawn_near_ego and ego_location:
+                dx = loc.x - ego_location.x
+                dy = loc.y - ego_location.y
+                dist = (dx * dx + dy * dy) ** 0.5
+
+                if dist > spawn_radius:
+                    continue  # Too far, skip
+
+            spawn_point = carla.Transform()
+            spawn_point.location = loc
+            spawn_points.append(spawn_point)
+
+        if not spawn_points:
+            logger.warning("Could not find valid navigation points for pedestrians")
+            self.walker_ids = []
+            return
+
+        logger.info(f"  Found {len(spawn_points)} valid spawn points")
+
+        # 2. Spawn walker actors
+        walkers_list = []
+        walker_speeds = []
+        batch = []
+
+        for spawn_point in spawn_points:
+            walker_bp = np_random.choice(walker_blueprints)
+
+            # Set as not invincible
+            if walker_bp.has_attribute('is_invincible'):
+                walker_bp.set_attribute('is_invincible', 'false')
+
+            # Set walking speed (use recommended walking speed)
+            if walker_bp.has_attribute('speed'):
+                walker_speeds.append(walker_bp.get_attribute('speed').recommended_values[1])
+            else:
+                walker_speeds.append(1.4)  # Default walking speed
+
+            batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
+
+        # Execute batch spawn
+        results = client.apply_batch_sync(batch, True)
+        valid_speeds = []
+        for i, result in enumerate(results):
+            if result.error:
+                logger.debug(f"Failed to spawn pedestrian: {result.error}")
+            else:
+                walkers_list.append({"id": result.actor_id})
+                valid_speeds.append(walker_speeds[i])
+        walker_speeds = valid_speeds
+
+        if not walkers_list:
+            logger.warning("No pedestrians were spawned successfully")
+            self.walker_ids = []
+            return
+
+        logger.info(f"  Spawned {len(walkers_list)}/{pedestrian_count} pedestrians")
+
+        # 3. Spawn AI controllers for each walker
+        walker_controller_bp = blueprint_lib.find('controller.ai.walker')
+        batch = []
+        for walker in walkers_list:
+            batch.append(carla.command.SpawnActor(walker_controller_bp, carla.Transform(), walker["id"]))
+
+        results = client.apply_batch_sync(batch, True)
+        for i, result in enumerate(results):
+            if result.error:
+                logger.debug(f"Failed to spawn walker controller: {result.error}")
+            else:
+                walkers_list[i]["con"] = result.actor_id
+
+        # 4. Collect all IDs (controller, walker pairs)
+        all_walker_ids = []
+        for walker in walkers_list:
+            if "con" in walker:
+                all_walker_ids.append(walker["con"])
+                all_walker_ids.append(walker["id"])
+
+        # Store for cleanup later
+        self.walker_ids = all_walker_ids
+
+        # Wait for tick to ensure transforms are ready
+        self.world.tick()
+
+        # 5. Initialize controllers and set them walking
+        all_actors = self.world.get_actors(all_walker_ids)
+        self.world.set_pedestrians_cross_factor(percentage_crossing)
+
+        initialized_count = 0
+        for i in range(0, len(all_walker_ids), 2):
+            try:
+                # Start the walker controller
+                all_actors[i].start()
+                # Set destination to random point
+                target = self.world.get_random_location_from_navigation()
+                if target:
+                    all_actors[i].go_to_location(target)
+                # Set max speed
+                all_actors[i].set_max_speed(float(walker_speeds[int(i/2)]))
+                initialized_count += 1
+            except Exception as e:
+                logger.debug(f"Error initializing walker controller: {e}")
+
+        logger.info(f"✓ Spawned {len(walkers_list)} pedestrians with {initialized_count} AI controllers")
+
     def destroy(self):
-        """Cleanup resources including thread pool and actors"""
+        """Cleanup resources including thread pool, pedestrians, and actors"""
+        import carla
+
         # Cleanup thread pool first to ensure no pending tasks
         if hasattr(self, 'thread_pool'):
             logger.info("Closing thread pool...")
             self.thread_pool.close()
             self.thread_pool.join()
             logger.info("Thread pool closed successfully")
+
+        # Cleanup pedestrians/walkers
+        if hasattr(self, 'walker_ids') and self.walker_ids and hasattr(self, 'client'):
+            logger.info(f"Destroying {len(self.walker_ids) // 2} pedestrians...")
+            try:
+                # Stop walker controllers first (every other ID is a controller)
+                all_actors = self.world.get_actors(self.walker_ids)
+                for i in range(0, len(self.walker_ids), 2):
+                    try:
+                        all_actors[i].stop()
+                    except Exception:
+                        pass
+
+                # Destroy all walker actors and controllers
+                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.walker_ids])
+                logger.info("Pedestrians destroyed successfully")
+            except Exception as e:
+                logger.warning(f"Error destroying pedestrians: {e}")
 
         # Then destroy actors
         self.root.destroy()

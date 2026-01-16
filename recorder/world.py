@@ -59,9 +59,13 @@ class WorldActor(PseudoActor):
                 transform = carla_transform_to_transform(carla_actor.get_transform())
                 bbox = carla_bbox_to_bbox(carla_actor.bounding_box)
                 if carla_actor.type_id.startswith('walker'):
-                    label_type = 'pedestrian'
+                    label_type = 'Pedestrian'
                 else:
-                    label_type = 'vehicle'
+                    # Classify vehicles - keep only Cars for training
+                    vehicle_id = carla_actor.type_id.lower()
+                    if any(x in vehicle_id for x in ['truck', 'bus', 'motorcycle', 'bicycle', 'motorbike', 'bike']):
+                        continue  # Skip non-car vehicles
+                    label_type = 'Car'
                 object_labels.append(ObjectLabel(frame=frame_id,
                                                  timestamp=timestamp,
                                                  label_type=label_type,
@@ -81,8 +85,8 @@ class WorldActor(PseudoActor):
             }
 
         # Count by type
-        vehicle_count = sum(1 for obj in object_labels if obj.label_type == 'vehicle')
-        pedestrian_count = sum(1 for obj in object_labels if obj.label_type == 'pedestrian')
+        vehicle_count = sum(1 for obj in object_labels if obj.label_type == 'Car')
+        pedestrian_count = sum(1 for obj in object_labels if obj.label_type == 'Pedestrian')
         static_count = len(object_labels) - vehicle_count - pedestrian_count
 
         os.makedirs(self.save_dir, exist_ok=True)
@@ -116,15 +120,18 @@ class WorldActor(PseudoActor):
 
     def get_env_objects_labels(self, frame, timestamp, object_type: carla.CityObjectLabel) -> list:
         object_labels = []
-        # Map CARLA 0.9.16 CityObjectLabel types to our label types
-        if object_type in (carla.CityObjectLabel.Car, carla.CityObjectLabel.Truck,
-                           carla.CityObjectLabel.Bus, carla.CityObjectLabel.Motorcycle,
-                           carla.CityObjectLabel.Bicycle):
-            label_type = 'vehicle'
+        # Map CARLA 0.9.16 CityObjectLabel types to match Autoware classes
+        # Keep CAR and PEDESTRIAN separate for training
+        if object_type == carla.CityObjectLabel.Car:
+            label_type = 'Car'
         elif object_type == carla.CityObjectLabel.Pedestrians:
-            label_type = 'pedestrian'
+            label_type = 'Pedestrian'
+        elif object_type in (carla.CityObjectLabel.Truck, carla.CityObjectLabel.Bus,
+                           carla.CityObjectLabel.Motorcycle, carla.CityObjectLabel.Bicycle):
+            # Skip other vehicle types (we only train on Cars)
+            return object_labels
         else:
-            label_type = 'any'
+            label_type = 'DontCare'
         env_objects = self.carla_world.get_environment_objects(object_type=object_type)
         for env_object in env_objects:
             transform = carla_transform_to_transform(env_object.transform)
