@@ -655,13 +655,42 @@ class ActorTree(object):
         spawn_front_bias = pedestrians_info.get('spawn_front_bias', 0.7)  # 70% bias toward front
         percentage_crossing = pedestrians_info.get('percentage_crossing', 0.2)  # 20% cross roads
 
-        # Get walker blueprints - filter to pedestrian only
+        # Get walker blueprints - filter to normal adult pedestrians only
+        # Exclude: children, police, and wheelchair users
         blueprint_lib = self.world.get_blueprint_library()
-        walker_blueprints = [bp for bp in blueprint_lib.filter('walker.pedestrian.*')]
+        all_walker_blueprints = blueprint_lib.filter('walker.pedestrian.*')
+
+        # IDs to exclude based on CARLA documentation
+        # Children: 0009-0014, 0048, 0049
+        # Police: 0030, 0032
+        excluded_ids = [
+            'walker.pedestrian.0009', 'walker.pedestrian.0010', 'walker.pedestrian.0011',
+            'walker.pedestrian.0012', 'walker.pedestrian.0013', 'walker.pedestrian.0014',
+            'walker.pedestrian.0030', 'walker.pedestrian.0032',
+            'walker.pedestrian.0048', 'walker.pedestrian.0049'
+        ]
+
+        walker_blueprints = []
+        for bp in all_walker_blueprints:
+            # Skip excluded IDs (children and police)
+            if bp.id in excluded_ids:
+                continue
+
+            # Skip if blueprint can use wheelchair (wheelchair users)
+            if bp.has_attribute('can_use_wheelchair'):
+                can_wheelchair = bp.get_attribute('can_use_wheelchair')
+                # Skip if the attribute value is 'true' (this pedestrian can use wheelchair)
+                if can_wheelchair.as_bool():
+                    continue
+
+            walker_blueprints.append(bp)
+
         if not walker_blueprints:
-            logger.warning("No pedestrian blueprints found!")
+            logger.warning("No normal adult pedestrian blueprints found after filtering!")
             self.walker_ids = []
             return
+
+        logger.info(f"Filtered to {len(walker_blueprints)} normal adult pedestrians (excluded children, police, wheelchair users)")
 
         logger.info(f"Spawning {pedestrian_count} pedestrians (near_ego={spawn_near_ego}, radius={spawn_radius}m, front_bias={spawn_front_bias})...")
 

@@ -131,128 +131,159 @@ class KittiObjectLabelTool:
             else:
                 label_type = 'DontCare'
 
-            if not is_valid_distance(lidar_trans.location, label.transform.location):
-                continue
-
-            # Convert object label to open3d bbox type in lidar coordinate
-            o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
-
-            # Scale up pedestrian bounding boxes for LiDAR point detection
-            # CARLA walker bbox is based on collision capsule (~0.38m x 0.38m x 1.3m)
-            # Real pedestrian is larger (~0.6m x 0.5m x 1.8m), so scale up for point capture
-            if label_type == 'Pedestrian':
-                # Create scaled bbox for point detection (2x width/depth, 1.5x height)
-                scaled_extent = o3d_bbox.extent.copy()
-                scaled_extent[0] *= 2.0  # Width
-                scaled_extent[1] *= 2.0  # Depth
-                scaled_extent[2] *= 1.5  # Height
-                o3d_bbox_for_points = o3d.geometry.OrientedBoundingBox(
-                    o3d_bbox.center, o3d_bbox.R, scaled_extent
-                )
+            # Range validation: Use stable range-based filtering (CARTI_Dataset approach)
+            # or traditional point cloud-based validation
+            if Param.USE_RANGE_BASED_FILTER:
+                # Stable approach: Check if object is within rectangular detection range
+                if not is_in_range_box(lidar_trans.location, label.transform.location):
+                    continue
+                # For range-based mode, set occlusion to 0 (fully visible) by default
+                # since we're not using point cloud validation
+                occlusion = 0
             else:
-                o3d_bbox_for_points = o3d_bbox
-
-            # Check lidar points in bbox
-            # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
-            points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
-            occlusion = cal_occlusion(o3d_pcd, o3d_bbox_for_points, points_min=points_min)
-            if occlusion < 0:
-                continue
-
-            # Get image dimensions
-            img_height, img_width = image.shape[0], image.shape[1]
-
-            # Transform bbox vertices to camera coordinate and project to 2D
-            vertex_points = np.asarray(o3d_bbox.get_box_points())
-            valid_projections = []
-            visible_vertices = 0
-
-            for p in vertex_points:
-                p_c = transform_lidar_point_to_cam(p, lidar_trans, cam_trans)
-
-                # Check depth: skip points behind camera
-                if p_c[2] <= 0:
+                # Traditional approach: Euclidean distance + point cloud validation
+                if not is_valid_distance(lidar_trans.location, label.transform.location):
                     continue
 
-                # Project to image (may return None)
-                p_uv = project_point_to_image(p_c, cam_mat)
-                if p_uv is None:
+                # Convert object label to open3d bbox type in lidar coordinate
+                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
+
+                # Check lidar points in bbox
+                # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
+                points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
+                occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=points_min)
+                if occlusion < 0:
                     continue
 
-                valid_projections.append(p_uv)
+            # Convert object label to open3d bbox type in lidar coordinate (if not already done)
+            if Param.USE_RANGE_BASED_FILTER:
+                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
 
-                # Check if projection is within image bounds
-                if 0 <= p_uv[0] < img_width and 0 <= p_uv[1] < img_height:
-                    visible_vertices += 1
+            # Check if camera filtering should be skipped (360° mode)
+            if Param.SKIP_CAMERA_FILTERS:
+                # 360° mode: Skip camera FOV filtering, label all objects using camera coordinates
+                bbox_2d = [0.0, 0.0, 50.0, 50.0]  # Dummy 2D bbox
+                truncated = 0.0
+                
+                # Transform bbox from LiDAR to camera coordinate
+                o3d_bbox_cam = o3d_bbox.rotate(T_lc[0:3, 0:3], np.array([0, 0, 0]))
+                o3d_bbox_cam = o3d_bbox_cam.translate(T_lc[0:3, 3])
+                
+                # Calculate rotation_y in camera coordinate system
+                rotation_y = -math.radians(label.transform.rotation.yaw - cam_trans.rotation.yaw)
+                rotation_y = math.atan2(math.sin(rotation_y), math.cos(rotation_y))
+                
+                # Calculate alpha (observation angle) in camera coordinate
+                bbox_center = np.asarray(o3d_bbox_cam.center)
+                theta = math.atan2(-bbox_center[0], bbox_center[2])
+                alpha = rotation_y - theta
+                alpha = math.atan2(math.sin(alpha), math.cos(alpha))
+                
+                # Generate label using camera coordinate function (same format, no filtering)
+                kitti_label = generate_kitti_labels(label_type, truncated, occlusion, alpha,
+                                                    bbox_2d, o3d_bbox_cam, rotation_y)
+                
+                kitti_labels.append(kitti_label)
+                bbox_list_3d.append(o3d_bbox_cam)
+                bbox_list_2d.append(bbox_2d)
+                
+            else:
+                # Camera-based mode: Apply all camera projection filters
+                # Get image dimensions
+                img_height, img_width = image.shape[0], image.shape[1]
 
-            # Filter 1: At least 2 vertices must be visible in image
-            if visible_vertices < 2:
-                continue
+                # Transform bbox vertices to camera coordinate and project to 2D
+                vertex_points = np.asarray(o3d_bbox.get_box_points())
+                valid_projections = []
+                visible_vertices = 0
 
-            # Filter 2: At least 4 valid projections required for valid bbox
-            if len(valid_projections) < 4:
-                continue
+                for p in vertex_points:
+                    p_c = transform_lidar_point_to_cam(p, lidar_trans, cam_trans)
 
-            # Calculate 2D bbox from valid projections
-            bbox_points_2d_x = [p[0] for p in valid_projections]
-            bbox_points_2d_y = [p[1] for p in valid_projections]
+                    # Check depth: skip points behind camera
+                    if p_c[2] <= 0:
+                        continue
 
-            x_min = min(bbox_points_2d_x)
-            x_max = max(bbox_points_2d_x)
-            y_min = min(bbox_points_2d_y)
-            y_max = max(bbox_points_2d_y)
+                    # Project to image (may return None)
+                    p_uv = project_point_to_image(p_c, cam_mat)
+                    if p_uv is None:
+                        continue
 
-            # Validate bbox dimensions
-            bbox_width = x_max - x_min
-            bbox_height = y_max - y_min
-            bbox_area = bbox_width * bbox_height
+                    valid_projections.append(p_uv)
 
-            # Filter 3: Bbox must have valid dimensions
-            if bbox_width <= 0 or bbox_height <= 0:
-                continue
+                    # Check if projection is within image bounds
+                    if 0 <= p_uv[0] < img_width and 0 <= p_uv[1] < img_height:
+                        visible_vertices += 1
 
-            # Filter 4: Minimum height requirement
-            # Pedestrians are smaller, use lower threshold (15px vs 25px for cars)
-            min_height = 15 if label_type == 'Pedestrian' else 25
-            if bbox_height < min_height:
-                continue
+                # Filter 1: At least 2 vertices must be visible in image
+                if visible_vertices < 2:
+                    continue
 
-            # Filter 5: Minimum area requirement
-            # Pedestrians are smaller, use lower threshold (50px vs 100px for cars)
-            min_area = 50 if label_type == 'Pedestrian' else 100
-            if bbox_area < min_area:
-                continue
+                # Filter 2: At least 4 valid projections required for valid bbox
+                if len(valid_projections) < 4:
+                    continue
 
-            # Filter 6: Bbox must be at least partially within image bounds
-            if x_max < 0 or x_min >= img_width or y_max < 0 or y_min >= img_height:
-                continue
+                # Calculate 2D bbox from valid projections
+                bbox_points_2d_x = [p[0] for p in valid_projections]
+                bbox_points_2d_y = [p[1] for p in valid_projections]
 
-            bbox_2d = [x_min, y_min, x_max, y_max]
+                x_min = min(bbox_points_2d_x)
+                x_max = max(bbox_points_2d_x)
+                y_min = min(bbox_points_2d_y)
+                y_max = max(bbox_points_2d_y)
 
-            # Calculate truncation
-            truncated = cal_truncated(img_height, img_width, bbox_2d)
+                # Validate bbox dimensions
+                bbox_width = x_max - x_min
+                bbox_height = y_max - y_min
+                bbox_area = bbox_width * bbox_height
 
-            # Transform bbox to camera coordinate for final checks
-            o3d_bbox_cam = bbox_to_o3d_bbox_in_target_coordinate(label, cam_trans)
+                # Filter 3: Bbox must have valid dimensions
+                if bbox_width <= 0 or bbox_height <= 0:
+                    continue
 
-            # Filter 7: Object must be in front of camera (using z-axis in camera coordinate)
-            if o3d_bbox_cam.center[2] <= 0:
-                continue
+                # Filter 4: Minimum height requirement
+                # Pedestrians are smaller, use lower threshold (15px vs 25px for cars)
+                min_height = 15 if label_type == 'Pedestrian' else 25
+                if bbox_height < min_height:
+                    continue
 
-            rotation_y = -math.radians(label.transform.rotation.yaw - cam_trans.rotation.yaw)
-            rotation_y = math.atan2(math.sin(rotation_y), math.cos(rotation_y))
+                # Filter 5: Minimum area requirement
+                # Pedestrians are smaller, use lower threshold (50px vs 100px for cars)
+                min_area = 50 if label_type == 'Pedestrian' else 100
+                if bbox_area < min_area:
+                    continue
 
-            bbox_center = np.asarray(o3d_bbox_cam.center)
-            theta = math.atan2(-bbox_center[0], bbox_center[2])
-            alpha = rotation_y - theta
-            alpha = math.atan2(math.sin(alpha), math.cos(alpha))
+                # Filter 6: Bbox must be at least partially within image bounds
+                if x_max < 0 or x_min >= img_width or y_max < 0 or y_min >= img_height:
+                    continue
 
-            kitti_label = generate_kitti_labels(label_type, truncated, occlusion, alpha,
-                                                bbox_2d, o3d_bbox_cam, rotation_y)
+                bbox_2d = [x_min, y_min, x_max, y_max]
 
-            kitti_labels.append(kitti_label)
-            bbox_list_3d.append(o3d_bbox_cam)
-            bbox_list_2d.append(bbox_2d)
+                # Calculate truncation
+                truncated = cal_truncated(img_height, img_width, bbox_2d)
+
+                # Transform bbox from LiDAR to camera coordinate
+                o3d_bbox_cam = o3d_bbox.rotate(T_lc[0:3, 0:3], np.array([0, 0, 0]))
+                o3d_bbox_cam = o3d_bbox_cam.translate(T_lc[0:3, 3])
+
+                # Filter 7: Object must be in front of camera (using z-axis in camera coordinate)
+                if o3d_bbox_cam.center[2] <= 0:
+                    continue
+
+                rotation_y = -math.radians(label.transform.rotation.yaw - cam_trans.rotation.yaw)
+                rotation_y = math.atan2(math.sin(rotation_y), math.cos(rotation_y))
+
+                bbox_center = np.asarray(o3d_bbox_cam.center)
+                theta = math.atan2(-bbox_center[0], bbox_center[2])
+                alpha = rotation_y - theta
+                alpha = math.atan2(math.sin(alpha), math.cos(alpha))
+
+                kitti_label = generate_kitti_labels(label_type, truncated, occlusion, alpha,
+                                                    bbox_2d, o3d_bbox_cam, rotation_y)
+
+                kitti_labels.append(kitti_label)
+                bbox_list_3d.append(o3d_bbox_cam)
+                bbox_list_2d.append(bbox_2d)
 
         # Preview each frame label result
         # if index < 35:

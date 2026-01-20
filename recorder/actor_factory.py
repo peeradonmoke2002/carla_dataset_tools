@@ -325,6 +325,22 @@ class ActorFactory(object):
         if not walker_blueprints:
             logger.warning("No pedestrian blueprints found!")
             return pedestrian_nodes, all_walker_ids
+        
+        # Filter out unwanted pedestrian types: wheelchair, police, and children
+        # Reference: https://carla.readthedocs.io/en/latest/catalogue_pedestrians/
+        excluded_types = ['wheelchair', 'police', 'child']
+        filtered_blueprints = []
+        for bp in walker_blueprints:
+            bp_id_lower = bp.id.lower()
+            if not any(excluded in bp_id_lower for excluded in excluded_types):
+                filtered_blueprints.append(bp)
+        
+        if not filtered_blueprints:
+            logger.warning("No valid pedestrian blueprints after filtering!")
+            return pedestrian_nodes, all_walker_ids
+        
+        walker_blueprints = filtered_blueprints
+        logger.info(f"Filtered pedestrian blueprints: {len(walker_blueprints)} types available (excluded: wheelchair, police, child)")
 
         # 1. Get random spawn locations from navigation mesh
         spawn_points = []

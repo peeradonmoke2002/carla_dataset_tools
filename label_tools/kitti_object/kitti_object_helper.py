@@ -21,6 +21,17 @@ class Param:
     RANGE_MIN = 1.0
     RANGE_MAX = 150.0
 
+    # Range-based filtering (stable approach from CARTI_Dataset)
+    # Uses rectangular bounding box instead of point cloud validation
+    USE_RANGE_BASED_FILTER = True  # Set to False to use point cloud-based filtering
+    RANGE_BOX_SIZE = 51.2  # Detection range in meters (±51.2m in X and Y from sensor)
+    
+    # Ego vehicle filter - exclude objects too close to sensor (likely ego vehicle)
+    EGO_FILTER_DISTANCE = 2.0  # Minimum distance from sensor to include object (meters)
+    
+    # 360° labeling mode (skip camera filters, label all directions)
+    SKIP_CAMERA_FILTERS = True  # Set to True for 360° LiDAR-only labeling
+
 
 def transform_lidar_point_to_cam(point, lidar_trans: Transform, cam_trans: Transform):
     p = np.append(point, [1.0])
@@ -59,12 +70,33 @@ def transform_o3d_bbox(o3d_bbox: o3d.geometry.OrientedBoundingBox, transform_mat
     return o3d_bbox
 
 
-def bbox_to_o3d_bbox_in_target_coordinate(label: ObjectLabel, target_transform: Transform):
+def bbox_to_o3d_bbox_in_target_coordinate(label: ObjectLabel, target_transform: Transform, adjust_pedestrian_z: bool = False):
+    """
+    Transform object label's bounding box to target coordinate system.
+    
+    Note on CARLA coordinate handling:
+    - For Cars: actor.get_transform().location.z returns the lowest point (ground level)
+    - For Pedestrians: actor.get_transform().location.z returns the body center
+    
+    However, the bounding_box.location already contains the local offset from actor origin
+    to the bbox center, so the transformation should handle this correctly.
+    The adjust_pedestrian_z flag is kept for backward compatibility but disabled by default
+    since the bbox.location already accounts for the proper offset.
+    """
     world_to_target = target_transform.get_inverse_matrix()
     label_to_world = label.transform.get_matrix()
     label_in_target = np.matmul(world_to_target, label_to_world)
     o3d_bbox = bbox_to_o3d_bbox(label.bounding_box)
     o3d_bbox = transform_o3d_bbox(o3d_bbox, label_in_target)
+    
+    # Only apply pedestrian Z adjustment if explicitly requested
+    # This is typically not needed since bounding_box.location already has correct offset
+    if adjust_pedestrian_z and label.label_type == 'Pedestrian':
+        # In LiDAR/world coords: Z is up, so subtract half height to lower the box
+        center = np.array(o3d_bbox.center)  # Make a writable copy
+        center[2] = center[2] - o3d_bbox.extent[2] / 2.0  # Lower by half height
+        o3d_bbox.center = center
+    
     o3d_bbox.color = np.array([1.0, 0, 0])
     return o3d_bbox
 
@@ -135,6 +167,50 @@ def cal_occlusion(pcd: o3d.geometry.PointCloud, bbox_3d: o3d.geometry.OrientedBo
 def is_valid_distance(source_location: Location, target_location: Location):
     dist = np.linalg.norm(source_location.get_vector() - target_location.get_vector())
     if Param.RANGE_MIN < dist < Param.RANGE_MAX:
+        return True
+    else:
+        return False
+
+
+def is_in_range_box(source_location: Location, target_location: Location, range_box_size=None):
+    """
+    Check if target is within a rectangular range box around source.
+
+    This is a more stable approach than point cloud-based validation,
+    following the CARTI_Dataset methodology. Uses axis-aligned bounding box
+    check instead of Euclidean distance.
+
+    Args:
+        source_location: Sensor location (e.g., LiDAR position)
+        target_location: Object location (e.g., vehicle or pedestrian)
+        range_box_size: Half-width of detection box in meters (default: Param.RANGE_BOX_SIZE)
+
+    Returns:
+        True if target is within range box, False otherwise
+
+    Example:
+        If range_box_size = 51.2, the detection box spans:
+        - X: [source.x - 51.2, source.x + 51.2]
+        - Y: [source.y - 51.2, source.y + 51.2]
+        - Z: no restriction (all heights)
+    """
+    if range_box_size is None:
+        range_box_size = Param.RANGE_BOX_SIZE
+
+    source_vec = source_location.get_vector()
+    target_vec = target_location.get_vector()
+
+    # Filter out ego vehicle - objects too close to sensor are likely the ego vehicle
+    dist = np.linalg.norm(source_vec[0:2] - target_vec[0:2])  # 2D distance (XY plane)
+    if dist < Param.EGO_FILTER_DISTANCE:
+        return False
+
+    # Check X and Y within rectangular bounds
+    # Z (height) is not restricted - objects at any height within XY range are valid
+    dx = abs(target_vec[0] - source_vec[0])
+    dy = abs(target_vec[1] - source_vec[1])
+
+    if dx <= range_box_size and dy <= range_box_size:
         return True
     else:
         return False
@@ -223,7 +299,10 @@ def generate_kitti_labels(label_type: str,
                           bbox_2d: list,
                           bbox_3d: o3d.geometry.OrientedBoundingBox,
                           rotation_y: float):
-    # Note: Kitti Object 3d bbox location is top-plane-center, not the bbox center
+    # Note: Kitti Object 3d bbox location is bottom-center (ground level), not the bbox center
+    # This function is for CAMERA coordinate system
+    # KITTI camera coords: X=right, Y=down, Z=forward
+    # KITTI dimensions order: Height, Width, Length
     label_str = "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} \n".format(label_type, truncated, occlusion, alpha,
                                                                          bbox_2d[0], bbox_2d[1],
                                                                          bbox_2d[2], bbox_2d[3],
@@ -235,3 +314,25 @@ def generate_kitti_labels(label_type: str,
                                                                          bbox_3d.center[2],
                                                                          rotation_y)
     return label_str
+
+
+# def generate_kitti_labels_lidar(label_type: str,
+#                                 truncated: float,
+#                                 occlusion: float,
+#                                 alpha: float,
+#                                 bbox_2d: list,
+#                                 bbox_3d: o3d.geometry.OrientedBoundingBox,
+#                                 rotation_y: float):
+#     # Note: For LiDAR coordinate system, use bottom-center of bbox
+#     # This function is for LIDAR coordinate system
+#     label_str = "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} \n".format(label_type, truncated, occlusion, alpha,
+#                                                                          bbox_2d[0], bbox_2d[1],
+#                                                                          bbox_2d[2], bbox_2d[3],
+#                                                                          bbox_3d.extent[2],
+#                                                                          bbox_3d.extent[1],
+#                                                                          bbox_3d.extent[0],
+#                                                                          bbox_3d.center[0],
+#                                                                          bbox_3d.center[1] + (bbox_3d.extent[2] / 2.0),
+#                                                                          bbox_3d.center[2],
+#                                                                          rotation_y)
+#     return label_str
