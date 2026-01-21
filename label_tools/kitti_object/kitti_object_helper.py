@@ -15,19 +15,19 @@ from core.transform import bbox_to_o3d_bbox
 
 
 class Param:
-    POINTS_MIN_CAR = 20       # Minimum LiDAR points for cars
-    POINTS_MIN_PEDESTRIAN = 5  # Minimum LiDAR points for pedestrians (smaller objects)
-    POINTS_MIN = 20           # Default (legacy)
+    POINTS_MIN_CAR = 5         # Minimum LiDAR points for cars (lower = detect farther)
+    POINTS_MIN_PEDESTRIAN = 1  # Minimum LiDAR points for pedestrians (smaller objects)
+    POINTS_MIN = 5             # Default (legacy)
     RANGE_MIN = 1.0
     RANGE_MAX = 150.0
 
-    # Range-based filtering (stable approach from CARTI_Dataset)
-    # Uses rectangular bounding box instead of point cloud validation
-    USE_RANGE_BASED_FILTER = True  # Set to False to use point cloud-based filtering
-    RANGE_BOX_SIZE = 51.2  # Detection range in meters (±51.2m in X and Y from sensor)
+    # # Range-based filtering (stable approach from CARTI_Dataset)
+    # # Uses rectangular bounding box instead of point cloud validation
+    # USE_RANGE_BASED_FILTER = True  # Set to False to use point cloud-based filtering
+    # RANGE_BOX_SIZE = 51.2  # Detection range in meters (±51.2m in X and Y from sensor)
     
     # Ego vehicle filter - exclude objects too close to sensor (likely ego vehicle)
-    EGO_FILTER_DISTANCE = 2.0  # Minimum distance from sensor to include object (meters)
+    # EGO_FILTER_DISTANCE = 2.0  # Minimum distance from sensor to include object (meters)
     
     # 360° labeling mode (skip camera filters, label all directions)
     SKIP_CAMERA_FILTERS = True  # Set to True for 360° LiDAR-only labeling
@@ -172,48 +172,48 @@ def is_valid_distance(source_location: Location, target_location: Location):
         return False
 
 
-def is_in_range_box(source_location: Location, target_location: Location, range_box_size=None):
-    """
-    Check if target is within a rectangular range box around source.
-
-    This is a more stable approach than point cloud-based validation,
-    following the CARTI_Dataset methodology. Uses axis-aligned bounding box
-    check instead of Euclidean distance.
-
-    Args:
-        source_location: Sensor location (e.g., LiDAR position)
-        target_location: Object location (e.g., vehicle or pedestrian)
-        range_box_size: Half-width of detection box in meters (default: Param.RANGE_BOX_SIZE)
-
-    Returns:
-        True if target is within range box, False otherwise
-
-    Example:
-        If range_box_size = 51.2, the detection box spans:
-        - X: [source.x - 51.2, source.x + 51.2]
-        - Y: [source.y - 51.2, source.y + 51.2]
-        - Z: no restriction (all heights)
-    """
-    if range_box_size is None:
-        range_box_size = Param.RANGE_BOX_SIZE
-
-    source_vec = source_location.get_vector()
-    target_vec = target_location.get_vector()
-
-    # Filter out ego vehicle - objects too close to sensor are likely the ego vehicle
-    dist = np.linalg.norm(source_vec[0:2] - target_vec[0:2])  # 2D distance (XY plane)
-    if dist < Param.EGO_FILTER_DISTANCE:
-        return False
-
-    # Check X and Y within rectangular bounds
-    # Z (height) is not restricted - objects at any height within XY range are valid
-    dx = abs(target_vec[0] - source_vec[0])
-    dy = abs(target_vec[1] - source_vec[1])
-
-    if dx <= range_box_size and dy <= range_box_size:
-        return True
-    else:
-        return False
+# def is_in_range_box(source_location: Location, target_location: Location, range_box_size=None):
+#     """
+#     Check if target is within a rectangular range box around source.
+#
+#     This is a more stable approach than point cloud-based validation,
+#     following the CARTI_Dataset methodology. Uses axis-aligned bounding box
+#     check instead of Euclidean distance.
+#
+#     Args:
+#         source_location: Sensor location (e.g., LiDAR position)
+#         target_location: Object location (e.g., vehicle or pedestrian)
+#         range_box_size: Half-width of detection box in meters (default: Param.RANGE_BOX_SIZE)
+#
+#     Returns:
+#         True if target is within range box, False otherwise
+#
+#     Example:
+#         If range_box_size = 51.2, the detection box spans:
+#         - X: [source.x - 51.2, source.x + 51.2]
+#         - Y: [source.y - 51.2, source.y + 51.2]
+#         - Z: no restriction (all heights)
+#     """
+#     if range_box_size is None:
+#         range_box_size = Param.RANGE_BOX_SIZE
+#
+#     source_vec = source_location.get_vector()
+#     target_vec = target_location.get_vector()
+#
+#     # Filter out ego vehicle - objects too close to sensor are likely the ego vehicle
+#     dist = np.linalg.norm(source_vec[0:2] - target_vec[0:2])  # 2D distance (XY plane)
+#     if dist < Param.EGO_FILTER_DISTANCE:
+#         return False
+#
+#     # Check X and Y within rectangular bounds
+#     # Z (height) is not restricted - objects at any height within XY range are valid
+#     dx = abs(target_vec[0] - source_vec[0])
+#     dy = abs(target_vec[1] - source_vec[1])
+#
+#     if dx <= range_box_size and dy <= range_box_size:
+#         return True
+#     else:
+#         return False
 
 
 def write_pointcloud(output_dir: str, frame_id: str, lidar_data: np.array):

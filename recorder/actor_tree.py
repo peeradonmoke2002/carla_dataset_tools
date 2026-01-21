@@ -617,15 +617,8 @@ class ActorTree(object):
         Based on CARLA's generate_traffic.py example. Spawns pedestrians at random
         navigation points and gives them AI controllers to walk around.
 
-        Supports spawn_near_ego option to spawn pedestrians close to ego vehicle
-        for better visibility in camera. Uses DIRECTIONAL spawning to prefer
-        pedestrians in front of the vehicle (where the camera can see them).
-
         Config options:
             count: Number of pedestrians to spawn
-            spawn_near_ego: If True, spawn within radius of ego vehicle (default: True)
-            spawn_radius: Radius in meters for spawn_near_ego (default: 80.0)
-            spawn_front_bias: Bias toward spawning in front (0.0-1.0, default: 0.7)
             percentage_crossing: Chance to cross roads (default: 0.2)
 
         Args:
@@ -650,9 +643,6 @@ class ActorTree(object):
             return
 
         # Get spawn configuration
-        spawn_near_ego = pedestrians_info.get('spawn_near_ego', True)  # Default: spawn near ego
-        spawn_radius = pedestrians_info.get('spawn_radius', 80.0)  # Default: 80m radius
-        spawn_front_bias = pedestrians_info.get('spawn_front_bias', 0.7)  # 70% bias toward front
         percentage_crossing = pedestrians_info.get('percentage_crossing', 0.2)  # 20% cross roads
 
         # Get walker blueprints - filter to normal adult pedestrians only
@@ -692,101 +682,23 @@ class ActorTree(object):
 
         logger.info(f"Filtered to {len(walker_blueprints)} normal adult pedestrians (excluded children, police, wheelchair users)")
 
-        logger.info(f"Spawning {pedestrian_count} pedestrians (near_ego={spawn_near_ego}, radius={spawn_radius}m, front_bias={spawn_front_bias})...")
+        logger.info(f"Spawning {pedestrian_count} pedestrians...")
 
-        # Get ego vehicle location and yaw if spawn_near_ego is enabled
-        ego_location = None
-        ego_yaw = 0.0  # Default yaw (facing +X)
-        if spawn_near_ego:
-            # Find the first vehicle (ego vehicle)
-            for cmd_idx, vehicle_node in self.vehicle_nodes_map.items():
-                cmd = self.spawn_commands[cmd_idx]
-                if cmd.get('type') == 'vehicle':
-                    try:
-                        ego_transform = vehicle_node.get_actor().carla_actor.get_transform()
-                        ego_location = ego_transform.location
-                        ego_yaw = math.radians(ego_transform.rotation.yaw)
-                        logger.info(f"  Ego position: ({ego_location.x:.1f}, {ego_location.y:.1f}), yaw={math.degrees(ego_yaw):.1f}°")
-                        break
-                    except Exception:
-                        pass
-
-        # Calculate ego forward direction vector (unit vector)
-        ego_forward_x = math.cos(ego_yaw)
-        ego_forward_y = math.sin(ego_yaw)
-
-        # 1. Get spawn locations from navigation mesh
-        # Use two lists: front (in camera view) and back (behind vehicle)
-        front_spawn_points = []
-        back_spawn_points = []
+        # 1. Get spawn locations from navigation mesh (simple random spawning)
+        spawn_points = []
         attempts = 0
         max_attempts = pedestrian_count * 50  # Try more times to find valid locations
 
-        while (len(front_spawn_points) + len(back_spawn_points)) < pedestrian_count and attempts < max_attempts:
+        while len(spawn_points) < pedestrian_count and attempts < max_attempts:
             attempts += 1
             loc = self.world.get_random_location_from_navigation()
 
             if loc is None:
                 continue
 
-            # If spawn_near_ego, filter by distance and direction
-            if spawn_near_ego and ego_location:
-                dx = loc.x - ego_location.x
-                dy = loc.y - ego_location.y
-                dist = (dx * dx + dy * dy) ** 0.5
-
-                if dist > spawn_radius:
-                    continue  # Too far, skip
-
-                # Calculate dot product to determine if location is in front or behind
-                # dot > 0 means in front of vehicle, dot < 0 means behind
-                if dist > 0.1:  # Avoid division by zero
-                    dot = (dx * ego_forward_x + dy * ego_forward_y) / dist
-                else:
-                    dot = 0
-
-                spawn_point = carla.Transform()
-                spawn_point.location = loc
-
-                # Categorize: front hemisphere (dot > -0.2) or back hemisphere
-                # Using -0.2 as threshold to include some side pedestrians as "front"
-                if dot > -0.2:
-                    front_spawn_points.append(spawn_point)
-                else:
-                    back_spawn_points.append(spawn_point)
-            else:
-                # No ego-based filtering, add to front list
-                spawn_point = carla.Transform()
-                spawn_point.location = loc
-                front_spawn_points.append(spawn_point)
-
-        logger.info(f"  Found spawn points: {len(front_spawn_points)} front, {len(back_spawn_points)} back")
-
-        # 2. Select spawn points with front bias
-        # Target: spawn_front_bias % from front, rest from back
-        target_front = int(pedestrian_count * spawn_front_bias)
-        target_back = pedestrian_count - target_front
-
-        # Take from front list (up to target_front)
-        selected_front = front_spawn_points[:target_front]
-        # Take from back list (up to target_back)
-        selected_back = back_spawn_points[:target_back]
-
-        # If we don't have enough from one category, fill from the other
-        remaining = pedestrian_count - len(selected_front) - len(selected_back)
-        if remaining > 0:
-            # Try to fill from remaining front points
-            extra_front = front_spawn_points[target_front:target_front + remaining]
-            selected_front.extend(extra_front)
-            remaining -= len(extra_front)
-
-        if remaining > 0:
-            # Try to fill from remaining back points
-            extra_back = back_spawn_points[target_back:target_back + remaining]
-            selected_back.extend(extra_back)
-
-        spawn_points = selected_front + selected_back
-        logger.info(f"  Selected: {len(selected_front)} front, {len(selected_back)} back = {len(spawn_points)} total")
+            spawn_point = carla.Transform()
+            spawn_point.location = loc
+            spawn_points.append(spawn_point)
 
         if not spawn_points:
             logger.warning("Could not find valid navigation points for pedestrians")

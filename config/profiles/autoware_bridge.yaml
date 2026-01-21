@@ -192,7 +192,5 @@ other_vehicles:
 # Pedestrians - Walking NPCs with AI controllers
 # ============================================================================
 pedestrians:
-  count: 80                 # 80 pedestrians for good visibility
-  spawn_near_ego: true      # Spawn within radius of ego vehicle
-  spawn_radius: 80.0        # Spawn within 80m of ego vehicle
+  count: 80                 # Number of pedestrians to spawn
   percentage_crossing: 0.3  # 30% chance to cross roads

@@ -87,6 +87,37 @@ class DataRecorder:
         self.debug_helper = self.world.debug  # Initialize debug helper
         self.logger.info("✓ Map loaded")
 
+        # Clean up any existing actors from previous sessions
+        self.logger.info("Cleaning up existing actors...")
+        all_actors = self.world.get_actors()
+        
+        # Destroy vehicles
+        vehicles = all_actors.filter('vehicle.*')
+        for actor in vehicles:
+            try:
+                actor.destroy()
+            except:
+                pass  # Ignore static map objects
+        
+        # Destroy walkers
+        walkers = all_actors.filter('walker.*')
+        for actor in walkers:
+            try:
+                actor.destroy()
+            except:
+                pass
+        
+        # Destroy controllers
+        controllers = all_actors.filter('controller.*')
+        for actor in controllers:
+            try:
+                actor.destroy()
+            except:
+                pass
+        
+        self.logger.info(f"✓ Cleaned up actors (vehicles: {len(vehicles)}, walkers: {len(walkers)})")
+        self.logger.info("Note: Static map vehicles (part of map geometry) cannot be removed")
+
         # ============================================================
         # Phase 2: Configure Synchronous Mode
         # ============================================================

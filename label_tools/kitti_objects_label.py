@@ -131,34 +131,32 @@ class KittiObjectLabelTool:
             else:
                 label_type = 'DontCare'
 
-            # Range validation: Use stable range-based filtering (CARTI_Dataset approach)
-            # or traditional point cloud-based validation
-            if Param.USE_RANGE_BASED_FILTER:
-                # Stable approach: Check if object is within rectangular detection range
-                if not is_in_range_box(lidar_trans.location, label.transform.location):
-                    continue
-                # For range-based mode, set occlusion to 0 (fully visible) by default
-                # since we're not using point cloud validation
-                occlusion = 0
-            else:
-                # Traditional approach: Euclidean distance + point cloud validation
-                if not is_valid_distance(lidar_trans.location, label.transform.location):
-                    continue
+            # Range validation: Use traditional point cloud-based validation
+            # (Range-based filtering commented out for simplicity)
+            # if Param.USE_RANGE_BASED_FILTER:
+            #     # Stable approach: Check if object is within rectangular detection range
+            #     if not is_in_range_box(lidar_trans.location, label.transform.location):
+            #         continue
+            #     # For range-based mode, set occlusion to 0 (fully visible) by default
+            #     # since we're not using point cloud validation
+            #     occlusion = 0
+            # else:
+            
+            # Traditional approach: Euclidean distance + point cloud validation
+            if not is_valid_distance(lidar_trans.location, label.transform.location):
+                continue
 
-                # Convert object label to open3d bbox type in lidar coordinate
-                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
+            # Convert object label to open3d bbox type in lidar coordinate
+            o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
 
-                # Check lidar points in bbox
-                # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
-                points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
-                occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=points_min)
-                if occlusion < 0:
-                    continue
+            # Check lidar points in bbox
+            # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
+            points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
+            occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=points_min)
+            if occlusion < 0:
+                continue
 
-            # Convert object label to open3d bbox type in lidar coordinate (if not already done)
-            if Param.USE_RANGE_BASED_FILTER:
-                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
-
+            # (Range-based filtering block removed - using point cloud validation above)
             # Check if camera filtering should be skipped (360° mode)
             if Param.SKIP_CAMERA_FILTERS:
                 # 360° mode: Skip camera FOV filtering, label all objects using camera coordinates
@@ -242,14 +240,14 @@ class KittiObjectLabelTool:
                     continue
 
                 # Filter 4: Minimum height requirement
-                # Pedestrians are smaller, use lower threshold (15px vs 25px for cars)
-                min_height = 15 if label_type == 'Pedestrian' else 25
+                # Pedestrians are smaller, use lower threshold (5px vs 10px for cars)
+                min_height = 5 if label_type == 'Pedestrian' else 10
                 if bbox_height < min_height:
                     continue
 
                 # Filter 5: Minimum area requirement
-                # Pedestrians are smaller, use lower threshold (50px vs 100px for cars)
-                min_area = 50 if label_type == 'Pedestrian' else 100
+                # Pedestrians are smaller, use lower threshold (10px vs 25px for cars)
+                min_area = 10 if label_type == 'Pedestrian' else 25
                 if bbox_area < min_area:
                     continue
 
@@ -346,7 +344,8 @@ def main():
 
     record_name = args.record
     if args.vehicle == 'all':
-        vehicle_name_list = [os.path.basename(x) for x in glob.glob('{}/{}/vehicle.*'.format(RAW_DATA_PATH, record_name))]
+        # Match both vehicle.* (dots) and vehicle_* (underscores)
+        vehicle_name_list = [os.path.basename(x) for x in glob.glob('{}/{}/vehicle[._]*'.format(RAW_DATA_PATH, record_name))]
     else:
         vehicle_name_list = [args.vehicle]
 

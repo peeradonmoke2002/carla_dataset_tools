@@ -28,7 +28,7 @@ spectator:
 # ============================================================================
 world_settings:
   synchronous_mode: true
-  fixed_delta_seconds: 0.03333  # 30 Hz to match lidar rotation_frequency
+  fixed_delta_seconds: 0.03333  # 30 Hz - EXACTLY matches bridge lidar rotation_frequency
   substepping: true
   max_substep_delta_time: 0.005
   max_substeps: 20
@@ -63,26 +63,28 @@ sensor_templates:
     image_size_y: 1080
     fov: 90.0
 
-  # LiDAR - matches bridge lidar configuration
+  # LiDAR - EXACTLY matches bridge lidar configuration
   autoware_lidar: &autoware_lidar
     type: sensor.lidar.ray_cast
     range: 100
-    channels: 64
-    points_per_second: 300000
+    channels: 64               # Matching bridge exactly
+    points_per_second: 1300000  # Matching bridge exactly
     upper_fov: 10.0
     lower_fov: -30.0
-    rotation_frequency: 30
+    rotation_frequency: 30.0   # Matching bridge exactly (30Hz)
     noise_stddev: 0.0
+    sensor_tick: 0.0           # Matching bridge
 
   # Semantic LiDAR for ground truth labels
   autoware_semantic_lidar: &autoware_semantic_lidar
     type: sensor.lidar.ray_cast_semantic
     range: 100
-    channels: 64
-    points_per_second: 300000
+    channels: 64               # Match main LiDAR
+    points_per_second: 1300000  # Match main LiDAR
     upper_fov: 10.0
     lower_fov: -30.0
-    rotation_frequency: 30
+    rotation_frequency: 30.0   # Match main LiDAR
+    sensor_tick: 0.0
 
   # GNSS - matches bridge gnss configuration
   autoware_gnss: &autoware_gnss
@@ -111,10 +113,16 @@ sensor_templates:
 # Ego Vehicle with Autoware-compatible Sensors
 # ============================================================================
 actors:
-  # Primary ego vehicle - Tesla Model 3 (matching bridge)
+  # Primary ego vehicle - Tesla Model 3 (EXACTLY matching bridge)
   - type: vehicle.tesla.model3
     name: vehicle_1st
-    spawn_point: 73  # You can change this to match your preferred spawn point
+    spawn_point:
+      x: 92.11   # Matching bridge default spawn point
+      y: -105.66
+      z: 0.015
+      roll: 0.0
+      pitch: 0.0
+      yaw: 90.0
     sensors:
       # Front RGB Camera (image_2 for KITTI compatibility)
       - <<: *autoware_camera_front
@@ -183,17 +191,15 @@ actors:
           yaw: 0.0
 
 # ============================================================================
-# Background Traffic - MINIMAL for fast test
+# Background Traffic - More cars for better training data
 # ============================================================================
 other_vehicles:
-  count: 20                 # Only 20 background cars for quick test
+  count: 80                 # More cars = more labels
   spawn_points: []          # Random spawn points (filtered to cars only)
 
 # ============================================================================
 # Pedestrians - Walking NPCs with AI controllers
 # ============================================================================
 pedestrians:
-  count: 100                # More pedestrians = more in camera view
-  spawn_near_ego: true      # Spawn within radius of ego vehicle
-  spawn_radius: 50.0        # Closer radius (50m)
-  percentage_crossing: 0.5  # 50% chance to cross roads (more on road = more visible)
+  count: 200                # More pedestrians for better training data
+  percentage_crossing: 1  # 100% chance to cross roads (more visible on road)
