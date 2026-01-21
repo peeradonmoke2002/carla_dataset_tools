@@ -236,7 +236,13 @@ def create_3d_bbox(label: dict, calib: Optional[dict] = None) -> o3d.geometry.Or
     # Create bounding box in camera coordinate system
     # KITTI camera: X right, Y down, Z forward
     center_cam = np.array([x, y, z])
-    extent = np.array([l, w, h])  # Open3D uses [length, width, height]
+
+    # For pedestrians, height should remain vertical after transformation
+    # Try placing height in extent[1] (Y-axis in camera, which becomes Z-up in LiDAR)
+    if label['type'] in ['Pedestrian', 'Person_sitting', 'Cyclist']:
+        extent = np.array([w, h, l])  # [width, height, length]
+    else:
+        extent = np.array([l, w, h])  # [length, width, height] for vehicles
 
     # Create rotation matrix (rotation around Y-axis in camera coords)
     R_cam = np.array([

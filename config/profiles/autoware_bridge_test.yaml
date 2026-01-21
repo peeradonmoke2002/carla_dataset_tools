@@ -68,7 +68,7 @@ sensor_templates:
     type: sensor.lidar.ray_cast
     range: 100
     channels: 64               # Matching bridge exactly
-    points_per_second: 1300000  # Matching bridge exactly
+    points_per_second: 1000000  # Matching bridge exactly
     upper_fov: 10.0
     lower_fov: -30.0
     rotation_frequency: 30.0   # Matching bridge exactly (30Hz)
@@ -80,7 +80,7 @@ sensor_templates:
     type: sensor.lidar.ray_cast_semantic
     range: 100
     channels: 64               # Match main LiDAR
-    points_per_second: 1300000  # Match main LiDAR
+    points_per_second: 1000000  # Match main LiDAR
     upper_fov: 10.0
     lower_fov: -30.0
     rotation_frequency: 30.0   # Match main LiDAR

@@ -21,14 +21,22 @@ class Param:
     RANGE_MIN = 1.0
     RANGE_MAX = 150.0
 
+    # Distance-based filtering for pedestrians (smaller objects need different handling)
+    # Close pedestrians (<PEDESTRIAN_TRUST_RANGE): Trust CARLA ground truth, skip point validation
+    # Medium pedestrians (<PEDESTRIAN_MAX_RANGE): Use point validation with low threshold
+    # Far pedestrians (>PEDESTRIAN_MAX_RANGE): Skip (unreliable detection)
+    PEDESTRIAN_TRUST_RANGE = 30.0   # Trust ground truth within this range (meters)
+    PEDESTRIAN_MAX_RANGE = 50.0     # Maximum range for pedestrian labeling (meters)
+    CAR_MAX_RANGE = 150.0           # Maximum range for car labeling (meters)
+
     # # Range-based filtering (stable approach from CARTI_Dataset)
     # # Uses rectangular bounding box instead of point cloud validation
     # USE_RANGE_BASED_FILTER = True  # Set to False to use point cloud-based filtering
     # RANGE_BOX_SIZE = 51.2  # Detection range in meters (±51.2m in X and Y from sensor)
-    
+
     # Ego vehicle filter - exclude objects too close to sensor (likely ego vehicle)
     # EGO_FILTER_DISTANCE = 2.0  # Minimum distance from sensor to include object (meters)
-    
+
     # 360° labeling mode (skip camera filters, label all directions)
     SKIP_CAMERA_FILTERS = True  # Set to True for 360° LiDAR-only labeling
 
@@ -303,14 +311,21 @@ def generate_kitti_labels(label_type: str,
     # This function is for CAMERA coordinate system
     # KITTI camera coords: X=right, Y=down, Z=forward
     # KITTI dimensions order: Height, Width, Length
+
+    # KITTI dimensions order: Height, Width, Length
+    # Extract from bbox extent (standard KITTI mapping)
+    height = bbox_3d.extent[2]
+    width = bbox_3d.extent[1]
+    length = bbox_3d.extent[0]
+
     label_str = "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} \n".format(label_type, truncated, occlusion, alpha,
                                                                          bbox_2d[0], bbox_2d[1],
                                                                          bbox_2d[2], bbox_2d[3],
-                                                                         bbox_3d.extent[2],
-                                                                         bbox_3d.extent[1],
-                                                                         bbox_3d.extent[0],
+                                                                         height,
+                                                                         width,
+                                                                         length,
                                                                          bbox_3d.center[0],
-                                                                         bbox_3d.center[1] + (bbox_3d.extent[2] / 2.0),
+                                                                         bbox_3d.center[1] + (height / 2.0),
                                                                          bbox_3d.center[2],
                                                                          rotation_y)
     return label_str

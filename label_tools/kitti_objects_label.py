@@ -131,30 +131,46 @@ class KittiObjectLabelTool:
             else:
                 label_type = 'DontCare'
 
-            # Range validation: Use traditional point cloud-based validation
-            # (Range-based filtering commented out for simplicity)
-            # if Param.USE_RANGE_BASED_FILTER:
-            #     # Stable approach: Check if object is within rectangular detection range
-            #     if not is_in_range_box(lidar_trans.location, label.transform.location):
-            #         continue
-            #     # For range-based mode, set occlusion to 0 (fully visible) by default
-            #     # since we're not using point cloud validation
-            #     occlusion = 0
-            # else:
-            
-            # Traditional approach: Euclidean distance + point cloud validation
-            if not is_valid_distance(lidar_trans.location, label.transform.location):
-                continue
+            # Calculate distance from sensor to object
+            dist = np.linalg.norm(
+                lidar_trans.location.get_vector() - label.transform.location.get_vector()
+            )
 
-            # Convert object label to open3d bbox type in lidar coordinate
-            o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
+            # Distance-based filtering with class-specific thresholds
+            if label_type == 'Pedestrian':
+                # Pedestrians: Use distance-based approach due to sparse LiDAR points
+                if dist < Param.RANGE_MIN:
+                    continue  # Too close (likely ego vehicle area)
+                if dist > Param.PEDESTRIAN_MAX_RANGE:
+                    continue  # Too far for reliable pedestrian detection
 
-            # Check lidar points in bbox
-            # Use lower threshold for pedestrians (smaller objects have fewer LiDAR points)
-            points_min = Param.POINTS_MIN_PEDESTRIAN if label_type == 'Pedestrian' else Param.POINTS_MIN_CAR
-            occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=points_min)
-            if occlusion < 0:
-                continue
+                # Convert object label to open3d bbox type in lidar coordinate
+                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
+
+                if dist < Param.PEDESTRIAN_TRUST_RANGE:
+                    # Close pedestrians: Trust CARLA ground truth, minimal point validation
+                    p_in_bbox = o3d_bbox.get_point_indices_within_bounding_box(o3d_pcd.points)
+                    if len(p_in_bbox) >= 1:
+                        occlusion = 0  # Fully visible
+                    else:
+                        occlusion = 1  # Partly occluded (no points but within trust range)
+                else:
+                    # Medium range pedestrians: Use point validation with low threshold
+                    occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=Param.POINTS_MIN_PEDESTRIAN)
+                    if occlusion < 0:
+                        continue
+            else:
+                # Cars and other objects: Use traditional validation
+                if dist < Param.RANGE_MIN or dist > Param.CAR_MAX_RANGE:
+                    continue
+
+                # Convert object label to open3d bbox type in lidar coordinate
+                o3d_bbox = bbox_to_o3d_bbox_in_target_coordinate(label, lidar_trans)
+
+                # Check lidar points in bbox
+                occlusion = cal_occlusion(o3d_pcd, o3d_bbox, points_min=Param.POINTS_MIN_CAR)
+                if occlusion < 0:
+                    continue
 
             # (Range-based filtering block removed - using point cloud validation above)
             # Check if camera filtering should be skipped (360° mode)
