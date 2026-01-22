@@ -106,6 +106,30 @@ def get_frame_from_fullpath(path: str) -> int:
     return int(os.path.splitext(os.path.split(path)[-1])[0])
 
 
+def load_imu_data(path: str):
+    """Load IMU data and poses, return as a list of dictionaries.
+
+    IMU poses.csv format (no header): frame,timestamp,x,y,z,roll,pitch,yaw
+    """
+    imu_poses = {}
+
+    poses_file = f"{path}/poses.csv"
+    if not os.path.exists(poses_file):
+        return {}
+
+    with open(poses_file, 'r') as csv_file:
+        reader = csv.reader(csv_file)
+        for row in reader:
+            if len(row) >= 8:
+                frame = int(row[0])
+                imu_poses[frame] = Transform(
+                    Location(float(row[2]), float(row[3]), float(row[4])),
+                    Rotation(roll=float(row[5]), pitch=float(row[6]), yaw=float(row[7]))
+                )
+
+    return imu_poses
+
+
 def load_object_labels(path: str):
     """Load object label paths, return as a list of dictionaries."""
     object_labels_path_list = sorted(glob.glob("{}/*.pkl".format(path)))

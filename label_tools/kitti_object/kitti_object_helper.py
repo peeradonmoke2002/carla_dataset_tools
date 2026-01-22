@@ -250,7 +250,7 @@ def write_label(output_dir, frame_id, kitti_labels):
         label_file.writelines(kitti_labels)
 
 
-def write_calib(output_dir, frame_id, lidar_trans: Transform, cam_trans: Transform, camera_mat: np.array):
+def write_calib(output_dir, frame_id, lidar_trans: Transform, cam_trans: Transform, camera_mat: np.array, imu_trans: Transform = None):
     """ Saves the calibration matrices to a file.
         The resulting file will contain:
         3x4    p0-p3      Camera P matrix. Contains extrinsic
@@ -294,6 +294,23 @@ def write_calib(output_dir, frame_id, lidar_trans: Transform, cam_trans: Transfo
     velo_to_cam_str += '\n'
 
     calib_str.append(velo_to_cam_str)
+
+    # Tr_imu_to_velo: IMU to Velodyne transformation
+    # Calculate from actual IMU and LiDAR poses if available
+    if imu_trans is not None:
+        # Real transformation: Tr_imu_to_velo = lidar_inverse * imu_matrix
+        imu_to_velo = np.matmul(lidar_trans.get_inverse_matrix(), imu_trans.get_matrix())
+        imu_to_velo = imu_to_velo[0:3, :]
+        imu_to_velo = imu_to_velo.reshape(1, 12).tolist()
+        imu_to_velo_str = "Tr_imu_to_velo: "
+        for x in imu_to_velo[0]:
+            imu_to_velo_str += str(x)
+            imu_to_velo_str += ' '
+        imu_to_velo_str += '\n'
+    else:
+        # Fallback: identity matrix (IMU and LiDAR co-located)
+        imu_to_velo_str = "Tr_imu_to_velo: 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0 \n"
+    calib_str.append(imu_to_velo_str)
 
     with open(file_path, 'w') as calib_file:
         calib_file.writelines(calib_str)

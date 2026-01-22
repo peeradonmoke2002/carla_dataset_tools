@@ -26,6 +26,9 @@ def gather_rawdata_to_dataframe(record_name: str, vehicle_name: str, lidar_path:
     # Load camera data
     camera_rawdata_list = load_camera_data(f"{RAW_DATA_PATH}/{record_name}/{vehicle_name}/{camera_path}")
 
+    # Load IMU data (for Tr_imu_to_velo calibration)
+    imu_poses = load_imu_data(f"{RAW_DATA_PATH}/{record_name}/{vehicle_name}/imu")
+
     # Create dictionaries for quick lookup by frame
     lidar_dict = {item['frame']: item for item in lidar_rawdata_list}
     camera_dict = {item['frame']: item for item in camera_rawdata_list}
@@ -43,6 +46,10 @@ def gather_rawdata_to_dataframe(record_name: str, vehicle_name: str, lidar_path:
         # Merge camera data
         if frame in camera_dict:
             merged_item.update(camera_dict[frame])
+
+        # Merge IMU pose
+        if frame in imu_poses:
+            merged_item['imu_pose'] = imu_poses[frame]
 
         merged_data.append(merged_item)
 
@@ -105,6 +112,7 @@ class KittiObjectLabelTool:
         lidar_trans: Transform = frame['lidar_pose']
         cam_trans: Transform = frame['camera_pose']
         cam_mat = np.asarray(frame['camera_matrix'])
+        imu_trans: Transform = frame.get('imu_pose', None)  # May not exist in older datasets
 
         image = read_image(frame['camera_rawdata_path'])
 
@@ -322,7 +330,7 @@ class KittiObjectLabelTool:
             output_dir = f"{DATASET_PATH}/{self.record_name}/{self.vehicle_name}/kitti_object/training"
         else:
             output_dir = f"{DATASET_PATH}/{self.output_dir}/kitti_object/training"
-        write_calib(output_dir, index, lidar_trans, cam_trans, cam_mat)
+        write_calib(output_dir, index, lidar_trans, cam_trans, cam_mat, imu_trans)
         write_label(output_dir, index, kitti_labels)
         write_image(output_dir, index, image)
         write_pointcloud(output_dir, index, pointcloud_raw)
