@@ -17,10 +17,18 @@ class YoloConfig:
 
 
 # Convert DataFrame to a list of dictionaries for label lookup
+# Colors are from CARLA CityScapesPalette (RGB format)
+# Reference: https://carla.readthedocs.io/en/latest/ref_sensors/#semantic-segmentation-camera
 LABEL_LIST = [
-    # {'raw_value': 4, 'color': (220, 20, 60), 'coco_names_index': 0},
-    {'raw_value': 18, 'color': (250, 170, 30), 'coco_names_index': 9},
-    {'raw_value': 12, 'color': (220, 220, 0), 'coco_names_index': 80},
+    {'raw_value': 4, 'color': (220, 20, 60), 'coco_names_index': 0},    # Pedestrian -> person
+    {'raw_value': 10, 'color': (0, 0, 142), 'coco_names_index': 2},     # Vehicle -> car
+    {'raw_value': 18, 'color': (250, 170, 30), 'coco_names_index': 9},  # TrafficLight -> traffic light
+    {'raw_value': 12, 'color': (220, 220, 0), 'coco_names_index': 80},  # TrafficSign -> traffic sign
+    {'raw_value': 19, 'color': (119, 11, 32), 'coco_names_index': 1},   # Bicycle -> bicycle
+    {'raw_value': 17, 'color': (0, 0, 230), 'coco_names_index': 3},     # Motorcycle -> motorcycle
+    {'raw_value': 14, 'color': (0, 0, 70), 'coco_names_index': 7},      # Truck -> truck
+    {'raw_value': 15, 'color': (0, 60, 100), 'coco_names_index': 5},    # Bus -> bus
+    {'raw_value': 5, 'color': (255, 0, 0), 'coco_names_index': 0},      # Rider -> person (cyclist/motorcyclist)
 ]
 
 TL_LIGHT_LABEL = {'DEFAULT': 9,
@@ -28,10 +36,15 @@ TL_LIGHT_LABEL = {'DEFAULT': 9,
                   'GREEN': 81}
 
 LABEL_COLORS = np.array([
-    # (220, 20, 60),   # Pedestrian
-    # (0, 0, 142),     # Vehicle
-    (220, 220, 0),   # TrafficSign -> COCO INDEX
+    (220, 20, 60),   # Pedestrian
+    (0, 0, 142),     # Vehicle
     (250, 170, 30),  # TrafficLight
+    (220, 220, 0),   # TrafficSign
+    (119, 11, 32),   # Bicycle
+    (0, 0, 230),     # Motorcycle
+    (0, 0, 70),      # Truck
+    (0, 60, 100),    # Bus
+    (255, 0, 0),     # Rider
 ])
 
 COCO_NAMES = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',

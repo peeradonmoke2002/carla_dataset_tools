@@ -194,6 +194,4 @@ other_vehicles:
 # ============================================================================
 pedestrians:
   count: 100                # More pedestrians = more in camera view
-  spawn_near_ego: true      # Spawn within radius of ego vehicle
-  spawn_radius: 50.0        # Closer radius (50m)
-  percentage_crossing: 0.5  # 50% chance to cross roads (more on road = more visible)
+  percentage_crossing: 1.0  # 100% chance to cross roads (more on road = more visible)

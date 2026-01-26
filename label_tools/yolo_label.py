@@ -155,8 +155,11 @@ def main():
 
     record_name = args.record
     if args.vehicle == 'all':
+        # Match both vehicle.* (e.g., vehicle.tesla.model3_1) and vehicle_* (e.g., vehicle_1st)
         vehicle_name_list = [os.path.basename(x) for x in
                              glob.glob('{}/{}/vehicle.*'.format(RAW_DATA_PATH, record_name))]
+        vehicle_name_list += [os.path.basename(x) for x in
+                              glob.glob('{}/{}/vehicle_*'.format(RAW_DATA_PATH, record_name))]
     else:
         vehicle_name_list = [args.vehicle]
 
