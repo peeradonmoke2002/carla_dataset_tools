@@ -9,13 +9,13 @@ from pathlib import Path
 import transforms3d.euler
 
 sys.path.append(Path(__file__).parent.parent.as_posix())
-from core.geometry import Transform, Location
+from core.geometry import Transform, Location, Vector3d
 from core.types import ObjectLabel
 from core.transform import bbox_to_o3d_bbox
 
 
 class Param:
-    POINTS_MIN_CAR = 5         # Minimum LiDAR points for cars (lower = detect farther)
+    POINTS_MIN_CAR = 10         # Minimum LiDAR points for cars (lower = detect farther)
     POINTS_MIN_PEDESTRIAN = 1  # Minimum LiDAR points for pedestrians (smaller objects)
     POINTS_MIN = 5             # Default (legacy)
     RANGE_MIN = 1.0
@@ -323,7 +323,8 @@ def generate_kitti_labels(label_type: str,
                           alpha: float,
                           bbox_2d: list,
                           bbox_3d: o3d.geometry.OrientedBoundingBox,
-                          rotation_y: float):
+                          rotation_y: float,
+                          velocity: Vector3d = None):
     # Note: Kitti Object 3d bbox location is bottom-center (ground level), not the bbox center
     # This function is for CAMERA coordinate system
     # KITTI camera coords: X=right, Y=down, Z=forward
@@ -335,7 +336,17 @@ def generate_kitti_labels(label_type: str,
     width = bbox_3d.extent[1]
     length = bbox_3d.extent[0]
 
-    label_str = "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} \n".format(label_type, truncated, occlusion, alpha,
+    # Add velocity if available (vx, vy in camera coordinate system)
+    # CARLA velocity is in world coordinate, need to transform to camera coordinate
+    # For now, use X and Y components directly (vx, vy)
+    if velocity is not None:
+        vx = velocity.x
+        vy = velocity.y
+    else:
+        vx = 0.0
+        vy = 0.0
+
+    label_str = "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} \n".format(label_type, truncated, occlusion, alpha,
                                                                          bbox_2d[0], bbox_2d[1],
                                                                          bbox_2d[2], bbox_2d[3],
                                                                          height,
@@ -344,7 +355,9 @@ def generate_kitti_labels(label_type: str,
                                                                          bbox_3d.center[0],
                                                                          bbox_3d.center[1] + (height / 2.0),
                                                                          bbox_3d.center[2],
-                                                                         rotation_y)
+                                                                         rotation_y,
+                                                                         vx,
+                                                                         vy)
     return label_str
 
 

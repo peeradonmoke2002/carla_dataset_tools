@@ -58,6 +58,9 @@ class WorldActor(PseudoActor):
                     or carla_actor.type_id.startswith('walker'):
                 transform = carla_transform_to_transform(carla_actor.get_transform())
                 bbox = carla_bbox_to_bbox(carla_actor.bounding_box)
+                # Get velocity from CARLA actor
+                carla_vel = carla_actor.get_velocity()
+                velocity = Vector3d(carla_vel.x, carla_vel.y, carla_vel.z)
                 if carla_actor.type_id.startswith('walker'):
                     label_type = 'Pedestrian'
                 else:
@@ -71,7 +74,8 @@ class WorldActor(PseudoActor):
                                                  label_type=label_type,
                                                  carla_id=carla_actor.id,
                                                  transform=transform,
-                                                 bounding_box=bbox))
+                                                 bounding_box=bbox,
+                                                 velocity=velocity))
 
         if len(object_labels) == 0:
             return {
@@ -143,5 +147,6 @@ class WorldActor(PseudoActor):
                                              label_type=label_type,
                                              carla_id=env_object.id,
                                              transform=transform,
-                                             bounding_box=BoundingBox(Location(0, 0, 0), bbox_extent)))
+                                             bounding_box=BoundingBox(Location(0, 0, 0), bbox_extent),
+                                             velocity=Vector3d(0, 0, 0)))
         return object_labels

@@ -7,7 +7,7 @@
 # Recording Settings - 3 MINUTE TEST
 # ============================================================================
 recording:
-  frame_total: 5400         # 3 minutes at 30Hz (180 seconds × 30 = 5400 frames)
+  frame_total: 12000         # 3 minutes at 30Hz (180 seconds × 30 = 5400 frames)
   frame_step: 3             # Save every 3rd frame (1800 saved frames total, 10Hz output)
   map: Town01               # Default map (matching bridge default)
   weather: ClearNoon        # Weather preset
@@ -194,7 +194,7 @@ actors:
 # Background Traffic - More cars for better training data
 # ============================================================================
 other_vehicles:
-  count: 80                 # More cars = more labels
+  count: 100                 # More cars = more labels
   spawn_points: []          # Random spawn points (filtered to cars only)
 
 # ============================================================================

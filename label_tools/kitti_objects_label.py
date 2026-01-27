@@ -203,7 +203,7 @@ class KittiObjectLabelTool:
                 
                 # Generate label using camera coordinate function (same format, no filtering)
                 kitti_label = generate_kitti_labels(label_type, truncated, occlusion, alpha,
-                                                    bbox_2d, o3d_bbox_cam, rotation_y)
+                                                    bbox_2d, o3d_bbox_cam, rotation_y, label.velocity)
                 
                 kitti_labels.append(kitti_label)
                 bbox_list_3d.append(o3d_bbox_cam)
@@ -301,7 +301,7 @@ class KittiObjectLabelTool:
                 alpha = math.atan2(math.sin(alpha), math.cos(alpha))
 
                 kitti_label = generate_kitti_labels(label_type, truncated, occlusion, alpha,
-                                                    bbox_2d, o3d_bbox_cam, rotation_y)
+                                                    bbox_2d, o3d_bbox_cam, rotation_y, label.velocity)
 
                 kitti_labels.append(kitti_label)
                 bbox_list_3d.append(o3d_bbox_cam)
